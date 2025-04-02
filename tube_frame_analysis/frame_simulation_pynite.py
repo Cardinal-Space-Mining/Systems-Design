@@ -72,9 +72,6 @@ def shear_constants(shape, distance_from_centroid, *args):
 # We start by defining the left side, then mirroring all nodes except the symmetry nodes.
 # Symmetry nodes are locked to Y=0, but otherwise behave like intermediate nodes
 reaction_nodes = {"R1": [0,0,0], "R2": [0,0,0], "L1": [0,0,0], "L2": [0,0,0]}
-for node in reaction_nodes:
-    
-    pass
 
 load_nodes = []
 intermediate_nodes = []
