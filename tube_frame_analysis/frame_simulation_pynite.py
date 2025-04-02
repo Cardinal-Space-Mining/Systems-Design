@@ -65,7 +65,22 @@ def shear_constants(shape, distance_from_centroid, *args):
     
 
 #start with initial frame design, regolith load, mining load, and twisting load
-reaction_nodes = []
+
+#frame design
+# +X is forward, +Y is left, +Z is up (right hand rule)
+# Therefore, mirror means flipping the sign of the Y coordinate
+# We start by defining the left side, then mirroring all nodes except the symmetry nodes.
+# Symmetry nodes are locked to Y=0, but otherwise behave like intermediate nodes
+reaction_nodes = {"R1": [0,0,0], "R2": [0,0,0], "L1": [0,0,0], "L2": [0,0,0]}
+for node in reaction_nodes:
+    
+    pass
+
+load_nodes = []
+intermediate_nodes = []
+
+members = []
+
 # note that these load cases have different supports
 #build frame
 #build load cases
