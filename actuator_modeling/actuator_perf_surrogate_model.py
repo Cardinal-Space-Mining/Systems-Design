@@ -5,8 +5,8 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import openmdao.api as om
 import random
+from scipy.optimize import curve_fit
 
 
 # step 1: load data from csv file (originally on Teams)
@@ -42,18 +42,17 @@ torques = pareto_front['Rated Torque'].to_list()
 speeds = pareto_front['Rated Speed'].to_list()
 masses = pareto_front['total weight'].to_list()
 
-"""
+
 fig = plt.figure(figsize=(8, 7))
 ax = fig.add_subplot(projection='3d')
 ax.scatter(torques, speeds, masses, c='blue', marker='o', s=20, label='All Data')
-plt.show()
 
 
-"""
+ 
 
 # select the validation subsets
 validation_subset_fraction = 0.2
-validation_subsets = 5
+validation_subsets = 10
 sample_size = int(len(skus))
 
 validation_subset_size = int(sample_size * validation_subset_fraction)
@@ -75,7 +74,6 @@ for i in range(validation_subsets):
         
         random_index = sampling_order[j]
 
-        # append the corresponding data to the validation subset
         validation_torques[i].append(torques[random_index])
         validation_speeds[i].append(speeds[random_index])
         validation_masses[i].append(masses[random_index])
@@ -85,7 +83,6 @@ for i in range(validation_subsets):
         
         random_index = sampling_order[j]
 
-        # append the corresponding data to the training subset
         training_torques[i].append(torques[random_index])
         training_speeds[i].append(speeds[random_index])
         training_masses[i].append(masses[random_index])
@@ -94,87 +91,111 @@ for i in range(validation_subsets):
 
 
 
+
 # step 3: fit an n-degree polynomial to the pareto front data
 
-max_polynomial_degree = 5
+def n_degree_polynomial(X, *weights):
+    """
+    Polynomial function of variable degree for curve fitting.
+    """
+    torque, speed = X
+    degree = int((len(weights) ** 0.5) - 1)  # Infer degree from the number of weights
 
-class PolynomialSSE(om.ExplicitComponent):
-    def setup(self):
-        self.add_input('torques', val=np.zeros(len(torques)))
-        self.add_input('speeds', val=np.zeros(len(speeds)))
-        self.add_input('masses', val=np.zeros(len(masses)))
+    function_value = 0.0
+    weight_index = 0
+    for i in range(degree + 1):
+        for j in range(degree + 1):
+            function_value += weights[weight_index] * (torque ** i) * (speed ** j)
+            weight_index += 1
 
-        self.add_input('degree', val=0)
-        self.add_input('weights', val= 100 * np.ones((3, 3)))
-
-        self.add_output('SSE', val=0.0)
-        self.add_output('fitted_masses', val=np.zeros(len(masses)))
-
-    def setup_partials(self):
-        self.declare_partials('*', '*', method='fd', step=1e-10)
-    
-    def compute(self, inputs, outputs):
-        weights = inputs['weights']
-        degree = inputs['degree']
-
-        torques = inputs['torques']
-        speeds = inputs['speeds']
-        masses = inputs['masses']
-
-        SSE = 0.0
-        fitted_masses = np.zeros(len(masses))
-
-        for k, mass in enumerate(masses):
-            curve_val = 0.0
-            for i in range(int(degree[0]) + 1):
-                for j in range(int(degree[0]) + 1):
-                    curve_val += (weights[j,i]) * (torques[k]**i) * (speeds[k]**j)
-                    fitted_masses[k] = curve_val
-                    SSE += (curve_val - mass)**2
-
-        outputs['SSE'] = SSE
-        outputs['fitted_masses'] = fitted_masses
+    return function_value
 
 
 
+# Perform cross validation to determine best polynomial degree
 
-model = om.Group()
-model.add_subsystem('fittedSSE', PolynomialSSE(), promotes=['*'])
+max_polynomial_degree = 5  # Maximum degree of polynomial to fit
 
-prob = om.Problem(model)
+cross_valid_SSEs = [[] for _ in range(1, max_polynomial_degree)]
 
-prob.driver = om.ScipyOptimizeDriver()
-prob.driver.options['optimizer'] = 'SLSQP'
+for degree in range(1, max_polynomial_degree):
 
-prob.model.add_design_var('weights')
-prob.model.add_objective('SSE')
+    for subset_index in range(validation_subsets):
 
-prob.setup()
+        # Dynamically calculate the number of weights based on the degree
+        num_weights = (degree + 1) ** 2
+        initial_weights = [0.1] * num_weights  # Initial guess for weights
 
-prob.set_val('torques', torques)
-prob.set_val('speeds', speeds)
-prob.set_val('masses', masses)
-prob.set_val('degree', 2)
+        # Fit the curve only using the training subset
 
+        fit = curve_fit(
+            n_degree_polynomial,
+            (training_torques[subset_index], training_speeds[subset_index]),
+            training_masses[subset_index],
+            p0=initial_weights,
+            maxfev=10000
+        )
 
-
-
-prob.run_driver()
-
-weights = prob.get_val("weights")
-final_SSE = prob.get_val("SSE")
-
-print(f"final SSE: {final_SSE}")
-
-print(f"weights:")
-print(weights)
+        fitted_weights = fit[0]
 
 
+        # find the SSE with respect to the corresponding validation subset
+        subset_SSE = 0.0
+
+        for k in range(len(validation_torques[subset_index])):
+            test_point = (validation_torques[subset_index][k], validation_speeds[subset_index][k])
+            fit_value = n_degree_polynomial(test_point, *fitted_weights)
+            subset_SSE += (validation_masses[subset_index][k] - fit_value) ** 2
+        
+        cross_valid_SSEs[degree - 1].append(subset_SSE)
+
+print("Cross-validation SSEs:")
+print(np.array(cross_valid_SSEs))
+
+
+# build a model using all of the data and a specified degree
+degree = 4          #should be manually set based on the results of the above cross-validation
+num_weights = (degree + 1) ** 2
+initial_weights = [0.1] * num_weights  # Initial guess for weights
+
+# Fit the curve
+fit = curve_fit(
+    n_degree_polynomial,
+    (torques, speeds),
+    masses,
+    p0=initial_weights,
+    maxfev=10000
+)
+
+fitted_weights = fit[0]
 
 
 
-# step 4: perform k-fold cross validation to determine the best polynomial degree
+# Plot the fitted polynomial
 
-# step 5: retrain the model with the best polynomial degree on the entire dataset
+x = np.linspace(0, 130, 30)
+y = np.linspace(0, 650, 30)
+  
+X, Y = np.meshgrid(x, y)
+Z = np.zeros(X.shape)
+
+for i in range(X.shape[0]):
+    for j in range(X.shape[1]):
+        Z[i, j] = n_degree_polynomial((X[i, j], Y[i, j]), *fitted_weights)
+
+for i in range(len(Z)):
+    for j in range(len(Z[i])):
+        if Z[i][j] > 3:
+            Z[i][j] = 3
+        if Z[i][j] < 0:
+            Z[i][j] = 0
+
+ax.plot_wireframe(X, Y, Z, color ='green')
+ax.set_xlabel("Torque (Nm)")
+ax.set_ylabel("Speed (rpm)")
+ax.set_zlabel("Mass")
+plt.show()
+
+
 
 
