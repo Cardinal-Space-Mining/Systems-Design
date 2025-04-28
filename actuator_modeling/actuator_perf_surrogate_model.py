@@ -117,6 +117,7 @@ def n_degree_polynomial(X, *weights):
 max_polynomial_degree = 5  # Maximum degree of polynomial to fit
 
 cross_valid_SSEs = [[] for _ in range(1, max_polynomial_degree)]
+average_SSEs = []
 
 for degree in range(1, max_polynomial_degree):
 
@@ -148,13 +149,24 @@ for degree in range(1, max_polynomial_degree):
             subset_SSE += (validation_masses[subset_index][k] - fit_value) ** 2
         
         cross_valid_SSEs[degree - 1].append(subset_SSE)
+    
+    average_SSE_for_current_degree = np.mean((cross_valid_SSEs[degree - 1]))
+    average_SSEs.append(average_SSE_for_current_degree)
+    print(f"Degree {degree} SSE: {average_SSE_for_current_degree}")
 
-print("Cross-validation SSEs:")
-print(np.array(cross_valid_SSEs))
+# print("Cross-validation SSEs:")
+# print(np.array(cross_valid_SSEs))
+
+# plot the cross-validation SSEs
+plt.figure(figsize=(8, 6))
+plt.boxplot(cross_valid_SSEs)
+plt.xlabel("Polynomial Degree")
+plt.ylabel("Sum of Squared Errors (SSE)")
+plt.title("Cross-validation SSE for Different Polynomial Degrees")
 
 
 # build a model using all of the data and a specified degree
-degree = 4          #should be manually set based on the results of the above cross-validation
+degree = 2          #should be manually set based on the results of the above cross-validation
 num_weights = (degree + 1) ** 2
 initial_weights = [0.1] * num_weights  # Initial guess for weights
 
@@ -168,6 +180,13 @@ fit = curve_fit(
 )
 
 fitted_weights = fit[0]
+
+
+
+# Next is to create the max power constraint line based on the data so that our optimizer can avoid the "center" of the data where no motors exist
+# This is a repeat of the previous strategy, but we only consider the pareto front of speed vs. torque, not mass
+
+
 
 
 
